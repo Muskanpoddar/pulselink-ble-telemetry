@@ -1,3 +1,3 @@
-# pulse_link
+# pulselink-ble-telemetry
 
 A new Flutter project.
