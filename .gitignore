@@ -49,3 +49,6 @@ app.*.map.json
 
 # Local editor and agent tooling
 .claude/
+
+# Local Flutter DevTools settings
+devtools_options.yaml
