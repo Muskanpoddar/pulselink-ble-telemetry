@@ -30,7 +30,9 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
     GattServiceProviderAdvertisingParameters,
     GattWriteOption,
 )
+from winrt.windows.devices.power import Battery
 from winrt.windows.storage.streams import DataWriter
+from winrt.windows.system.power import BatteryStatus, PowerManager
 
 # --- GATT profile (must match lib/core/constants/ble_constants.dart) --------
 SERVICE_UUID = uuid_module.UUID("f0a1c000-1a2b-4c3d-8e9f-001122334455")
@@ -45,19 +47,48 @@ PACKET_LENGTH = 41
 CHECKSUM_OFFSET = 39
 FLAG_MOVING = 0x01
 FLAG_LOW_BATTERY = 0x02
+FLAG_CHARGING = 0x04
 
 PUBLISH_INTERVAL_S = 0.2  # 5 Hz
 
 latest_packet = bytes(PACKET_LENGTH)
 
 
-def build_packet(sequence, accel, gyro, temperature, speed, battery):
+def read_power_state():
+    """The real battery state of this machine, straight from Windows.
+
+    Returns (percent, charging, present).
+    """
+    percent = int(PowerManager.remaining_charge_percent)
+    status = PowerManager.battery_status
+    present = status != BatteryStatus.NOT_PRESENT
+    charging = status == BatteryStatus.CHARGING
+
+    aggregate = Battery.aggregate_battery
+    if aggregate is not None:
+        report = aggregate.get_report()
+        remaining = report.remaining_capacity_in_milliwatt_hours
+        full = report.full_charge_capacity_in_milliwatt_hours
+        if remaining is not None and full:
+            percent = max(0, min(100, round(remaining * 100 / full)))
+
+        rate = report.charge_rate_in_milliwatts
+        if rate is not None and status == BatteryStatus.IDLE:
+            # The rate is signed: positive fills the cell, negative drains it.
+            charging = rate > 0
+
+    return percent, charging, present
+
+
+def build_packet(sequence, accel, gyro, temperature, speed, battery, charging):
     """Builds the 41 byte telemetry packet, byte for byte like the Dart side."""
     flags = 0
     if speed > 1.0:
         flags |= FLAG_MOVING
     if battery < 20:
         flags |= FLAG_LOW_BATTERY
+    if charging:
+        flags |= FLAG_CHARGING
 
     body = struct.pack(
         "<BBBHffffffffH",
@@ -165,6 +196,11 @@ async def main():
 
     print(f"Advertising service {SERVICE_UUID}")
     print(f"Telemetry characteristic {TELEMETRY_UUID} (notify)")
+
+    percent, charging, present = read_power_state()
+    print(f"\nBattery  : real, from Windows ({percent} %{'  charging' if charging else ''})")
+    print("Motion   : simulated, a laptop has no accelerometer or gyroscope")
+    print("Temperature: simulated, Windows exposes no CPU temperature API\n")
     print("Press Ctrl+C to stop.\n")
 
     sequence = 0
@@ -175,6 +211,7 @@ async def main():
             t = time.monotonic() - started
             sequence += 1
 
+            # Motion channels are synthetic: there is no IMU on a laptop.
             accel = (0.42 * math.sin(t), 0.42 * math.cos(t * 0.8), 9.81)
             gyro = (
                 1.24 * math.sin(t * 0.7),
@@ -183,10 +220,12 @@ async def main():
             )
             temperature = 32.0 + 2.0 * math.sin(t / 10.0)
             speed = 18.0 + 6.0 * math.sin(t / 5.0)
-            battery = max(0, 87 - sequence // 40)
+
+            # The battery is the real one.
+            battery, charging, present = read_power_state()
 
             latest_packet = build_packet(
-                sequence, accel, gyro, temperature, speed, battery
+                sequence, accel, gyro, temperature, speed, battery, charging
             )
 
             if notify_char.subscribed_clients:

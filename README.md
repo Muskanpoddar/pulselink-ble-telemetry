@@ -123,6 +123,23 @@ off** in the app:
    `f0a1c001-…` notify characteristic must be listed.
 3. Open the **Dashboard** and press **START TELEMETRY**.
 
+#### What is measured and what is simulated
+
+The server says so on startup, so nothing is passed off as a real reading:
+
+```
+Battery  : real, from Windows (76 %)
+Motion   : simulated, a laptop has no accelerometer or gyroscope
+Temperature: simulated, Windows exposes no CPU temperature API
+```
+
+| Channel | Source |
+|---|---|
+| Battery % | **real** - `Windows.System.Power.PowerManager`, cross checked against the aggregate battery report |
+| Charging and low battery flags | **real** - derived from the battery status and the signed charge rate |
+| Accelerometer, gyroscope | simulated - a laptop has no IMU |
+| Speed, temperature | simulated - neither a sensor nor a public Windows API |
+
 `tools/ble_gatt_server/verify_client.py` closes the loop without a phone: it
 scans, connects, subscribes and decodes the packets with the same rules as the
 Dart parser.
@@ -144,6 +161,11 @@ using NimBLE-Arduino 2.x:
 
 The sketch builds the byte-exact packet described above, so the dashboard
 values match the serial log.
+
+The motion channels are synthetic placeholders - wire up the real IMU and fill
+in the loop. The battery is read from an ADC1 pin when you define
+`BATTERY_ADC_PIN` and put a 2:1 divider on the cell; without a divider the
+node reports a fixed level instead of an invented one.
 
 ## Project layout
 

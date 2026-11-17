@@ -49,6 +49,20 @@ float gTemperature = 31.5f;
 float gSpeed = 18.0f;
 uint16_t gBattery = 87;
 
+// --- Battery ---------------------------------------------------------------
+// Wire the cell through a 2:1 divider to an ADC1 pin (GPIO36 = ADC1_0) and
+// define BATTERY_ADC_PIN below. Without a divider the node reports a fixed
+// level rather than a made up one.
+#ifdef BATTERY_ADC_PIN
+float readBatteryPercent() {
+  float volts = analogReadMilliVolts(BATTERY_ADC_PIN) / 1000.0f * 2.0f;
+  float percent = (volts - 3.2f) / (4.2f - 3.2f) * 100.0f;
+  return constrain(percent, 0.0f, 100.0f);
+}
+#else
+float readBatteryPercent() { return 87.0f; }
+#endif
+
 // ---------------------------------------------------------------------------
 // Little endian helpers
 // ---------------------------------------------------------------------------
@@ -180,7 +194,7 @@ void loop() {
   gGyroZ = 0.10f * sinf(t * 0.3f);
   gTemperature = 32.0f + 2.0f * sinf(t / 10.0f);
   gSpeed = 18.0f + 6.0f * sinf(t / 5.0f);
-  if (gBattery > 0) gBattery--;
+  gBattery = (uint16_t)readBatteryPercent();
 
   if (gServer->getConnectedCount() > 0) {
     uint8_t packet[PACKET_LENGTH];
