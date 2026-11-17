@@ -1,4 +1,4 @@
-package com.example.pulse_link
+package com.pulselink.ble
 
 import io.flutter.embedding.android.FlutterActivity
 
