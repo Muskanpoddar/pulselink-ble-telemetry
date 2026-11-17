@@ -51,6 +51,14 @@ FLAG_CHARGING = 0x04
 
 PUBLISH_INTERVAL_S = 0.2  # 5 Hz
 
+# The golden packet: the same 41 bytes the Dart encoder and the ESP32 sketch
+# produce. `python pulselink_gatt_server.py --self-test` checks this server
+# against it, so the three implementations cannot drift apart unnoticed.
+GOLDEN_PACKET_HEX = (
+    "A501012A003D0AD73E0000A0BFC3F51C4152B89E3F0000003F000080BE0000FC41"
+    "0000924157006C0B"
+)
+
 latest_packet = bytes(PACKET_LENGTH)
 
 
@@ -138,6 +146,25 @@ async def create_characteristic(provider, characteristic_uuid, properties):
 
 async def main():
     global latest_packet
+
+    if "--self-test" in sys.argv:
+        packet = build_packet(
+            42,
+            (0.42, -1.25, 9.81),
+            (1.24, 0.50, -0.25),
+            31.5,
+            18.25,
+            87,
+            False,
+        )
+        actual = packet.hex().upper()
+        if actual != GOLDEN_PACKET_HEX:
+            print("PACKET FORMAT MISMATCH")
+            print(f"  expected {GOLDEN_PACKET_HEX}")
+            print(f"  actual   {actual}")
+            return 1
+        print("Packet format matches the Dart encoder and the ESP32 sketch.")
+        return 0
 
     print("Creating the PulseLink GATT service ...")
     result = await GattServiceProvider.create_async(SERVICE_UUID)

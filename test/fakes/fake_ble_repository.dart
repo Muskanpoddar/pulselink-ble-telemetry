@@ -23,6 +23,15 @@ class FakeBleRepository implements BleRepository {
   /// How many times [connect] was called.
   int connectCalls = 0;
 
+  /// The GATT database the fake peripheral exposes.
+  List<GattService> services = const [];
+
+  final Map<String, StreamController<List<int>>> _notificationControllers = {};
+
+  /// Pushes a notification payload to [uuid].
+  void emitNotification(String uuid, List<int> bytes) =>
+      _notificationControllers[uuid]?.add(bytes);
+
   @override
   Stream<BleAdapterState> get adapterState => _adapterController.stream;
 
@@ -65,7 +74,7 @@ class FakeBleRepository implements BleRepository {
   }
 
   @override
-  Future<List<GattService>> discoverServices() async => const [];
+  Future<List<GattService>> discoverServices() async => services;
 
   @override
   Future<List<int>> readCharacteristic(String uuid) async => const [];
@@ -77,11 +86,20 @@ class FakeBleRepository implements BleRepository {
   Future<void> setNotifyEnabled(String uuid, bool enabled) async {}
 
   @override
-  Stream<List<int>> notifications(String uuid) => const Stream.empty();
+  Stream<List<int>> notifications(String uuid) => _notificationControllers
+      .putIfAbsent(
+        uuid,
+        () => StreamController<List<int>>.broadcast(),
+      )
+      .stream;
 
   void dispose() {
     _adapterController.close();
     _scanController.close();
     _connectionController.close();
+    for (final controller in _notificationControllers.values) {
+      controller.close();
+    }
+    _notificationControllers.clear();
   }
 }

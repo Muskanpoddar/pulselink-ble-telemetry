@@ -84,6 +84,27 @@ packet is counted, never fatal.
 The 41 byte payload does not fit into the default 23 byte BLE MTU, so the app
 requests a larger MTU after connecting and the firmware sets one as well.
 
+### Verifying the wire format
+
+The Dart app, the Windows server and the ESP32 sketch are three independent
+implementations of that layout, so they are all checked against one golden
+packet: sequence 42, moving, accel 0.42 / -1.25 / 9.81, gyro 1.24 / 0.50 /
+-0.25, 31.5 °C, 18.25 km/h, 87 %.
+
+```
+A5 01 01 2A 00 3D 0A D7 3E 00 00 A0 BF C3 F5 1C 41 52 B8 9E 3F 00 00
+00 3F 00 00 80 BE 00 00 FC 41 00 00 92 41 57 00 6C 0B
+```
+
+```bash
+flutter test test/packet_vector_test.dart     # the Dart encoder
+python tools/ble_gatt_server/pulselink_gatt_server.py --self-test
+```
+
+The ESP32 sketch compares itself against the same bytes on boot and prints
+`Packet format matches the Dart encoder` in the serial log, so a flashed board
+proves its own format.
+
 ## GATT profile
 
 | UUID | Properties |
@@ -94,7 +115,11 @@ requests a larger MTU after connecting and the firmware sets one as well.
 | `f0a1c003-1a2b-4c3d-8e9f-001122334455` | read - device info |
 
 If the known telemetry characteristic is missing, the app subscribes to every
-notify characteristic and keeps the first one that yields valid packets.
+notify characteristic and keeps the first one that yields valid packets. To
+take control instead, open the **GATT** tab and tap the ▶ button on any notify
+characteristic: the app subscribes to exactly that one and jumps to the
+dashboard. The dashboard's **Connection** card always names the characteristic
+that is delivering packets.
 
 ## Hardware bring-up (Stage 2)
 
@@ -142,7 +167,9 @@ Temperature: simulated, Windows exposes no CPU temperature API
 
 `tools/ble_gatt_server/verify_client.py` closes the loop without a phone: it
 scans, connects, subscribes and decodes the packets with the same rules as the
-Dart parser.
+Dart parser. It needs a **second** Bluetooth adapter or a second machine -
+Windows never delivers its own BLE advertisements back to a local scanner, so
+the client cannot see a server running on the same PC.
 
 ```bash
 pip install "bleak[winrt]"
@@ -203,6 +230,8 @@ flutter test
 | Suite | Covers |
 |---|---|
 | `telemetry_frame_test.dart` | decoding, validation, little-endian order, encode round trip |
+| `packet_vector_test.dart` | the golden packet, identical in the app, the server and the firmware |
+| `telemetry_repository_test.dart` | characteristic selection, explicit choice, rejection of a non notifying one |
 | `reconnect_policy_test.dart` | backoff schedule and attempt limit |
 | `connection_controller_test.dart` | connect, failure, unexpected drop, user disconnect |
 | `scanner_controller_test.dart` | strongest reading per device, sorting, scan errors |
@@ -211,14 +240,19 @@ flutter test
 ## Limitations
 
 - The GATT profile is our own; a peripheral with a different UUID layout still
-  works for scanning and GATT browsing, but telemetry needs the packet format
-  above.
+  works for scanning and GATT browsing, and you can point the client at any
+  notify characteristic by hand, but telemetry needs the packet format above.
 - The dashboard charts are hand drawn with `CustomPainter` - no charting
   dependency, and no scrubbing or zooming.
 - The simulated peripheral is a demo aid, not a radio simulator: it does not
   model connection timeouts or interference.
-- Stage 2 (real hardware) is verified on an ESP32; other peripherals work only
-  if they follow the packet format.
+- **The ESP32 path is not verified on hardware yet.** The sketch is written and
+  checks its own packet format on boot, but no board has been flashed. What is
+  verified on real hardware today is the Windows peripheral path: connection,
+  service discovery, notifications, parsing and the dashboard.
+- A Windows PC cannot supply motion or temperature data - it has no IMU and
+  Windows exposes no CPU temperature API to apps. Only the battery is real.
+  Real sensor values need the ESP32 node with an IMU wired up.
 
 ## Tech stack
 

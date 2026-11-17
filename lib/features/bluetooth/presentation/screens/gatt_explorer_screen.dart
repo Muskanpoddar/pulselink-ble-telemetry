@@ -7,8 +7,10 @@ import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/section_header.dart';
 import '../../domain/models/connection.dart';
 import '../../domain/models/gatt.dart';
+import '../providers/ble_providers.dart';
 import '../providers/connection_controller.dart';
 import '../providers/gatt_controller.dart';
+import '../providers/telemetry_controller.dart';
 
 /// Lists the services and characteristics of the connected peripheral.
 class GattExplorerScreen extends ConsumerStatefulWidget {
@@ -173,15 +175,30 @@ class _CharacteristicTile extends ConsumerWidget {
           ),
         ],
       ),
-      trailing: characteristic.canRead
-          ? IconButton(
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (characteristic.supportsNotification)
+            IconButton(
+              tooltip: 'Stream this characteristic',
+              icon: const Icon(Icons.play_circle_outline, size: 22),
+              onPressed: () {
+                ref
+                    .read(telemetryControllerProvider.notifier)
+                    .selectAndStart(characteristic.uuid);
+                ref.read(selectedTabProvider.notifier).select(2);
+              },
+            ),
+          if (characteristic.canRead)
+            IconButton(
               tooltip: 'Read',
               icon: const Icon(Icons.download_outlined, size: 20),
               onPressed: () => ref
                   .read(gattControllerProvider.notifier)
                   .read(characteristic.uuid),
-            )
-          : null,
+            ),
+        ],
+      ),
     );
   }
 }

@@ -12,7 +12,11 @@ abstract interface class TelemetryRepository {
   String? get sourceCharacteristic;
 
   /// Subscribes to the telemetry characteristic of the connected peripheral.
-  Future<void> start();
+  ///
+  /// Pass [characteristicUuid] to subscribe to exactly that characteristic,
+  /// otherwise the known one is used and every notify characteristic is probed
+  /// as a fallback.
+  Future<void> start({String? characteristicUuid});
 
   /// Unsubscribes again.
   Future<void> stop();

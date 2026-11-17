@@ -188,7 +188,7 @@ class SimulatedBleRepository implements BleRepository {
     final t =
         _sequence * AppConstants.simulatedPacketInterval.inMilliseconds /
         1000;
-    final battery = (87 - _sequence ~/ 40).clamp(0, 100);
+    final battery = (87 - _sequence ~/ 200).clamp(45, 100);
     final speed = (18 + 6 * math.sin(t / 5)).clamp(0.0, 120.0);
     return TelemetryFrame(
       sequence: _sequence,

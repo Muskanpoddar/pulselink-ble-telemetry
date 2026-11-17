@@ -15,6 +15,7 @@ class TelemetryState {
     this.speedHistory = const [],
     this.accelHistory = const [],
     this.isSubscribed = false,
+    this.selectedCharacteristic,
     this.sourceCharacteristic,
     this.errorMessage,
   });
@@ -25,6 +26,9 @@ class TelemetryState {
   final List<double> speedHistory;
   final List<double> accelHistory;
   final bool isSubscribed;
+
+  /// Characteristic the user picked in the GATT explorer, null means auto.
+  final String? selectedCharacteristic;
 
   /// UUID of the characteristic the packets are coming from.
   final String? sourceCharacteristic;
@@ -38,6 +42,7 @@ class TelemetryState {
     List<double>? speedHistory,
     List<double>? accelHistory,
     bool? isSubscribed,
+    String? selectedCharacteristic,
     String? sourceCharacteristic,
     String? errorMessage,
     bool clearError = false,
@@ -48,6 +53,8 @@ class TelemetryState {
     speedHistory: speedHistory ?? this.speedHistory,
     accelHistory: accelHistory ?? this.accelHistory,
     isSubscribed: isSubscribed ?? this.isSubscribed,
+    selectedCharacteristic:
+        selectedCharacteristic ?? this.selectedCharacteristic,
     sourceCharacteristic: sourceCharacteristic ?? this.sourceCharacteristic,
     errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
   );
@@ -77,7 +84,9 @@ class TelemetryController extends Notifier<TelemetryState> {
 
   Future<void> start() async {
     try {
-      await ref.read(telemetryRepositoryProvider).start();
+      await ref
+          .read(telemetryRepositoryProvider)
+          .start(characteristicUuid: state.selectedCharacteristic);
       state = state.copyWith(
         isSubscribed: true,
         clearError: true,
@@ -88,6 +97,12 @@ class TelemetryController extends Notifier<TelemetryState> {
     } catch (error) {
       state = state.copyWith(isSubscribed: false, errorMessage: '$error');
     }
+  }
+
+  /// Streams a specific characteristic, picked in the GATT explorer.
+  Future<void> selectAndStart(String characteristicUuid) async {
+    state = state.copyWith(selectedCharacteristic: characteristicUuid);
+    await start();
   }
 
   Future<void> stop() async {

@@ -32,13 +32,25 @@ class TelemetryRepositoryImpl implements TelemetryRepository {
   String? get sourceCharacteristic => _activeUuid;
 
   @override
-  Future<void> start() async {
+  Future<void> start({String? characteristicUuid}) async {
     await stop();
 
     final services = await _ble.discoverServices();
     final candidates = _notificationCharacteristics(services);
     if (candidates.isEmpty) {
       throw StateError('The peripheral exposes no notify characteristic.');
+    }
+
+    // An explicit choice wins over everything else.
+    if (characteristicUuid != null) {
+      final target = characteristicUuid.toLowerCase();
+      final match = candidates.where((c) => c.uuid.toLowerCase() == target);
+      if (match.isEmpty) {
+        throw StateError('Characteristic $characteristicUuid cannot notify.');
+      }
+      _activeUuid = match.first.uuid;
+      await _subscribe(match.first.uuid);
+      return;
     }
 
     // Prefer the characteristic of our own profile. Otherwise probe every
@@ -54,11 +66,15 @@ class TelemetryRepositoryImpl implements TelemetryRepository {
     }
 
     for (final candidate in selected) {
-      await _ble.setNotifyEnabled(candidate.uuid, true);
-      _subscriptions[candidate.uuid] = _ble
-          .notifications(candidate.uuid)
-          .listen((bytes) => _onPacket(candidate.uuid, bytes));
+      await _subscribe(candidate.uuid);
     }
+  }
+
+  Future<void> _subscribe(String uuid) async {
+    await _ble.setNotifyEnabled(uuid, true);
+    _subscriptions[uuid] = _ble
+        .notifications(uuid)
+        .listen((bytes) => _onPacket(uuid, bytes));
   }
 
   @override

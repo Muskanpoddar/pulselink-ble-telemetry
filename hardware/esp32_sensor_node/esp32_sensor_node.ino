@@ -38,16 +38,37 @@ static const char *DEVICE_NAME = "ESP32 Sensor Node";
 static const uint32_t PUBLISH_INTERVAL_MS = 200;  // 5 Hz
 
 NimBLEServer *gServer = nullptr;
-NimBLECharacteristic *gTelemetry = nullptr;
+NimBLECharacteristic *gNotifyCharacteristic = nullptr;
 
 uint16_t gSequence = 0;
 
+// One telemetry sample.
+struct Telemetry {
+  uint16_t sequence;
+  float accelX, accelY, accelZ;
+  float gyroX, gyroY, gyroZ;
+  float temperature;
+  float speed;
+  uint16_t battery;
+  bool moving;
+  bool charging;
+};
+
 // Sensor state. Replace the loop body with real readings.
-float gAccelX = 0.42f, gAccelY = 0.0f, gAccelZ = 9.81f;
-float gGyroX = 1.24f, gGyroY = 0.0f, gGyroZ = 0.0f;
-float gTemperature = 31.5f;
-float gSpeed = 18.0f;
-uint16_t gBattery = 87;
+Telemetry gSample = {
+    /* sequence   */ 0,
+    /* accelX     */ 0.42f,
+    /* accelY     */ 0.0f,
+    /* accelZ     */ 9.81f,
+    /* gyroX      */ 1.24f,
+    /* gyroY      */ 0.0f,
+    /* gyroZ      */ 0.0f,
+    /* temperature*/ 31.5f,
+    /* speed      */ 18.0f,
+    /* battery    */ 87,
+    /* moving     */ true,
+    /* charging   */ false,
+};
 
 // --- Battery ---------------------------------------------------------------
 // Wire the cell through a 2:1 divider to an ADC1 pin (GPIO36 = ADC1_0) and
@@ -89,30 +110,64 @@ static uint16_t checksum(const uint8_t *buffer, size_t length) {
 // ---------------------------------------------------------------------------
 // Packet builder
 // ---------------------------------------------------------------------------
-static void buildPacket(uint8_t *buffer) {
+static void buildPacket(uint8_t *buffer, const Telemetry &t) {
   memset(buffer, 0, PACKET_LENGTH);
 
   buffer[0] = PACKET_MAGIC;
   buffer[1] = PACKET_VERSION;
 
   uint8_t flags = 0;
-  if (gSpeed > 1.0f) flags |= FLAG_MOVING;
-  if (gBattery < 20) flags |= FLAG_LOW_BATTERY;
-  if (gBattery > 95) flags |= FLAG_CHARGING;
+  if (t.moving) flags |= FLAG_MOVING;
+  if (t.battery < 20) flags |= FLAG_LOW_BATTERY;
+  if (t.charging) flags |= FLAG_CHARGING;
   buffer[2] = flags;
 
-  putUint16LE(buffer, 3, gSequence++);
-  putFloat32LE(buffer, 5, gAccelX);
-  putFloat32LE(buffer, 9, gAccelY);
-  putFloat32LE(buffer, 13, gAccelZ);
-  putFloat32LE(buffer, 17, gGyroX);
-  putFloat32LE(buffer, 21, gGyroY);
-  putFloat32LE(buffer, 25, gGyroZ);
-  putFloat32LE(buffer, 29, gTemperature);
-  putFloat32LE(buffer, 33, gSpeed);
-  putUint16LE(buffer, 37, gBattery);
+  putUint16LE(buffer, 3, t.sequence);
+  putFloat32LE(buffer, 5, t.accelX);
+  putFloat32LE(buffer, 9, t.accelY);
+  putFloat32LE(buffer, 13, t.accelZ);
+  putFloat32LE(buffer, 17, t.gyroX);
+  putFloat32LE(buffer, 21, t.gyroY);
+  putFloat32LE(buffer, 25, t.gyroZ);
+  putFloat32LE(buffer, 29, t.temperature);
+  putFloat32LE(buffer, 33, t.speed);
+  putUint16LE(buffer, 37, t.battery);
 
   putUint16LE(buffer, CHECKSUM_OFFSET, checksum(buffer, CHECKSUM_OFFSET));
+}
+
+// The golden packet: the same 41 bytes the Dart encoder and the Python GATT
+// server produce. The sketch checks itself against it on boot, so the three
+// implementations cannot drift apart unnoticed.
+static const uint8_t GOLDEN_PACKET[PACKET_LENGTH] = {
+    0xA5, 0x01, 0x01, 0x2A, 0x00, 0x3D, 0x0A, 0xD7, 0x3E, 0x00, 0x00, 0xA0,
+    0xBF, 0xC3, 0xF5, 0x1C, 0x41, 0x52, 0xB8, 0x9E, 0x3F, 0x00, 0x00, 0x00,
+    0x3F, 0x00, 0x00, 0x80, 0xBE, 0x00, 0x00, 0xFC, 0x41, 0x00, 0x00, 0x92,
+    0x41, 0x57, 0x00, 0x6C, 0x0B};
+
+static void checkPacketFormat() {
+  Telemetry golden = gSample;
+  golden.sequence = 42;
+  golden.accelX = 0.42f;
+  golden.accelY = -1.25f;
+  golden.accelZ = 9.81f;
+  golden.gyroX = 1.24f;
+  golden.gyroY = 0.50f;
+  golden.gyroZ = -0.25f;
+  golden.temperature = 31.5f;
+  golden.speed = 18.25f;
+  golden.battery = 87;
+  golden.moving = true;
+  golden.charging = false;
+
+  uint8_t packet[PACKET_LENGTH];
+  buildPacket(packet, golden);
+
+  if (memcmp(packet, GOLDEN_PACKET, PACKET_LENGTH) == 0) {
+    Serial.println("Packet format matches the Dart encoder");
+  } else {
+    Serial.println("WARNING: packet format differs from the Dart encoder");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +197,7 @@ class CommandCallbacks : public NimBLECharacteristicCallbacks {
 void setup() {
   Serial.begin(115200);
   Serial.println("PulseLink sensor node starting");
+  checkPacketFormat();
 
   NimBLEDevice::init(DEVICE_NAME);
   // The 41 byte packet does not fit into the 23 byte default MTU.
@@ -152,7 +208,7 @@ void setup() {
 
   NimBLEService *service = gServer->createService(SERVICE_UUID);
 
-  gTelemetry = service->createCharacteristic(
+  gNotifyCharacteristic = service->createCharacteristic(
       TELEMETRY_UUID, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
 
   NimBLECharacteristic *command = service->createCharacteristic(
@@ -186,19 +242,23 @@ void loop() {
 
   // --- Replace with the real sensor readings ---------------------------
   float t = now / 1000.0f;
-  gAccelX = 0.42f * sinf(t);
-  gAccelY = 0.42f * cosf(t * 0.8f);
-  gAccelZ = 9.81f;
-  gGyroX = 1.24f * sinf(t * 0.7f);
-  gGyroY = 0.60f * cosf(t * 0.5f);
-  gGyroZ = 0.10f * sinf(t * 0.3f);
-  gTemperature = 32.0f + 2.0f * sinf(t / 10.0f);
-  gSpeed = 18.0f + 6.0f * sinf(t / 5.0f);
-  gBattery = (uint16_t)readBatteryPercent();
+  gSample.sequence = gSequence++;
+  gSample.accelX = 0.42f * sinf(t);
+  gSample.accelY = 0.42f * cosf(t * 0.8f);
+  gSample.accelZ = 9.81f;
+  gSample.gyroX = 1.24f * sinf(t * 0.7f);
+  gSample.gyroY = 0.60f * cosf(t * 0.5f);
+  gSample.gyroZ = 0.10f * sinf(t * 0.3f);
+  gSample.temperature = 32.0f + 2.0f * sinf(t / 10.0f);
+  gSample.speed = 18.0f + 6.0f * sinf(t / 5.0f);
+  gSample.battery = (uint16_t)readBatteryPercent();
+  gSample.moving = gSample.speed > 1.0f;
+  // Set this from a charger detect pin if the node has one.
+  gSample.charging = false;
 
   if (gServer->getConnectedCount() > 0) {
     uint8_t packet[PACKET_LENGTH];
-    buildPacket(packet);
-    gTelemetry->notify(packet, PACKET_LENGTH);
+    buildPacket(packet, gSample);
+    gNotifyCharacteristic->notify(packet, PACKET_LENGTH);
   }
 }
